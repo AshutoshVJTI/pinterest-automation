@@ -27,7 +27,7 @@ export default function ArticleGenerator({
         body: JSON.stringify({
           keyword,
           title,
-          html: '', // This will be generated on the server
+          content: '', // This will be generated on the server
         }),
       });
 
@@ -38,12 +38,12 @@ export default function ArticleGenerator({
       }
 
       // Check if we have article data and content
-      if (!data.article || !data.article.html) {
+      if (!data.article || !data.article.content) {
         throw new Error('No article content received');
       }
 
       // Clean up the content - remove any markdown formatting from the title
-      let cleanContent = data.article.html;
+      let cleanContent = data.article.content;
       cleanContent = cleanContent.replace(/\*\*/g, ''); // Remove bold markdown
       cleanContent = cleanContent.replace(/\[|\]/g, ''); // Remove square brackets
 

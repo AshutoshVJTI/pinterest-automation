@@ -8,7 +8,7 @@ import { getAuth } from 'firebase/auth';
 
 interface GeneratedArticle {
   title: string;
-  html: string;
+  content: string;
   coverImage: string;
   images: string[];
 }
@@ -68,7 +68,7 @@ export default function ArticleGenerator({
       await saveArticle({
         title,
         keyword,
-        html: data.article.html,
+        content: data.article.content,
         coverImage: data.article.coverImage,
         images: data.article.images,
       });
@@ -110,7 +110,7 @@ export default function ArticleGenerator({
           {/* Article Content */}
           <div 
             className="prose prose-lg max-w-none"
-            dangerouslySetInnerHTML={{ __html: article.html }}
+            dangerouslySetInnerHTML={{ __html: article.content }}
           />
         </div>
       )}

@@ -42,9 +42,9 @@ export async function POST(request: Request) {
     const decodedToken = await auth.verifyIdToken(token);
     const userId = decodedToken.uid;
 
-    const { title, html, coverImage, images } = await request.json();
+    const { title, content, coverImage, images } = await request.json();
 
-    if (!title || !html) {
+    if (!title || !content) {
       return NextResponse.json(
         { error: 'Title and HTML content are required' },
         { status: 400 }
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     const article = await Article.create({
       userId,
       title,
-      html,
+      content,
       coverImage,
       images,
       createdAt: new Date()

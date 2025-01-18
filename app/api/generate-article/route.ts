@@ -231,7 +231,7 @@ Remember: Only output the HTML structure with your content. No additional text o
       const article = await Article.create({
         userId,
         title: cleanTitle,
-        html: articleHtml, // Use the generated HTML content
+        content: articleHtml, // Use the generated HTML content
         coverImage,
         images: sectionImages,
         createdAt: new Date()

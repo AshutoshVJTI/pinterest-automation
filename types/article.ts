@@ -3,7 +3,7 @@ export interface Article {
   userId: string;
   title: string;
   keyword: string;
-  html: string;
+  content: string;
   coverImage: string;
   images: string[];
   createdAt: Date;
