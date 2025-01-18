@@ -5,10 +5,11 @@ import { Badge } from "@/components/ui/badge"
 
 interface KeywordSelectorProps {
   selectedKeyword: string;
-  onKeywordToggle: (keyword: string) => void;
+  onKeywordsSelected: (keyword: string) => void;
+  isLoading: boolean;
 }
 
-export function KeywordSelector({ selectedKeyword, onKeywordToggle }: KeywordSelectorProps) {
+export const KeywordSelector = ({ selectedKeyword, onKeywordsSelected, isLoading }: KeywordSelectorProps) => {
   const keywords = [
     "Fashion",
     "Technology",
@@ -27,7 +28,7 @@ export function KeywordSelector({ selectedKeyword, onKeywordToggle }: KeywordSel
         {keywords.map((keyword) => (
           <button
             key={keyword}
-            onClick={() => onKeywordToggle(keyword)}
+            onClick={() => onKeywordsSelected(keyword)}
             className={`px-4 py-2 rounded-full border ${
               selectedKeyword === keyword
                 ? "bg-blue-500 text-white border-blue-500"

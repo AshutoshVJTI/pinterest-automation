@@ -5,18 +5,29 @@ import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-export default function PinterestPoster({ article }: { article: any }) {
+interface PinterestPosterProps {
+  title: string;
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  onError: (error: string) => void;
+}
+
+export default function PinterestPoster({ 
+  title, 
+  isLoading, 
+  setIsLoading,
+  onError 
+}: PinterestPosterProps) {
   const [referralLink, setReferralLink] = useState('')
-  const [isPosting, setIsPosting] = useState(false)
 
   const handlePost = async () => {
-    setIsPosting(true)
+    setIsLoading(true)
     await fetch('/api/post-to-pinterest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ article, referralLink })
+      body: JSON.stringify({ article: title, referralLink })
     })
-    setIsPosting(false)
+    setIsLoading(false)
   }
 
   return (
@@ -36,10 +47,10 @@ export default function PinterestPoster({ article }: { article: any }) {
       />
       <Button 
         onClick={handlePost} 
-        disabled={isPosting}
+        disabled={isLoading}
         className="w-full bg-blue-500 hover:bg-blue-600 text-white"
       >
-        {isPosting ? 'Posting...' : 'Post to Pinterest'}
+        {isLoading ? 'Posting...' : 'Post to Pinterest'}
       </Button>
     </motion.div>
   )

@@ -1,14 +1,16 @@
-import { NextResponse } from "next/server";
-import Replicate from "replicate";
-import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+import Replicate from 'replicate';
+import { auth } from '@/lib/firebase-admin';
+import connectDB from '@/lib/mongodb';
+import Article from '@/lib/models/Article';
 
+// Helper function to wait for prediction
 async function waitForPrediction(replicate: Replicate, prediction: any) {
   let result = await replicate.predictions.get(prediction.id);
-  
+
   while (result.status !== 'succeeded' && result.status !== 'failed') {
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+    await new Promise(resolve => setTimeout(resolve, 1000));
     result = await replicate.predictions.get(prediction.id);
-    console.log('Prediction status:', result.status);
   }
 
   if (result.status === 'failed') {
@@ -18,209 +20,242 @@ async function waitForPrediction(replicate: Replicate, prediction: any) {
   return result;
 }
 
-export async function POST(req: Request) {
+// Initialize Replicate client
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
+});
+
+const DEBUG = process.env.NODE_ENV === 'development';
+
+export async function POST(request: Request) {
   try {
-    const { title } = await req.json();
-    
-    // Clean up the title - remove any markdown or extra formatting
-    const cleanTitle = title.replace(/\*\*/g, '').split('!')[0].trim();
-    
-    // Extract number and clean title separately
-    let numberOfPoints = 5; // default value
-    let displayTitle = cleanTitle;
-    
-    // Check for numeric numbers (e.g., "5 Best...")
-    const numberMatch = cleanTitle.match(/(\d+)\s+/);
-    if (numberMatch) {
-        numberOfPoints = parseInt(numberMatch[1]);
-        displayTitle = cleanTitle.replace(/^\d+\s+/, '');
-    } else {
-        // Check for written numbers
-        const writtenNumbers = {
-            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
-        };
-        for (const [word, num] of Object.entries(writtenNumbers)) {
-            const regex = new RegExp(`^(?:the\\s+)?${word}\\s+`, 'i');
-            if (cleanTitle.toLowerCase().match(regex)) {
-                numberOfPoints = num;
-                displayTitle = cleanTitle.replace(regex, '');
-                break;
-            }
-        }
+    // Add authentication check
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'No authorization header' }, { status: 401 });
     }
-    
-    // Remove "Top" if it exists at the start
-    displayTitle = displayTitle.replace(/^(?:the\s+)?top\s+/i, '');
-    
-    // Ensure minimum of 3 points
-    numberOfPoints = Math.max(numberOfPoints, 3);
 
-    const replicateLLM = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN,
-    });
+    const token = authHeader.substring('Bearer '.length);
+    const decodedToken = await auth.verifyIdToken(token);
+    const userId = decodedToken.uid;
 
-    const input = {
-      top_p: 0.9,
-      prompt: `Create a Pinterest article about: "${displayTitle}"
+    const { keyword, title } = await request.json();
 
-Generate EXACTLY ${numberOfPoints} tips/points (no more, no less) in this HTML format:
+    if (!keyword || !title) {
+      return NextResponse.json(
+        { error: 'Keyword and title are required' },
+        { status: 400 }
+      );
+    }
+
+    const articlePrompt = `You are a professional Pinterest article writer. Write an article about "${title}" related to "${keyword}".
+
+Your response must be a properly formatted HTML article with exactly 5 sections. Follow this exact format and structure:
 
 <article>
-  <h1>${displayTitle}</h1>
-  
+  <h1>${title}</h1>
   <div class="content">
-    <!-- Generate exactly ${numberOfPoints} sections, numbered 1 through ${numberOfPoints} -->
     <section class="point">
-      <h2>1. First Point</h2>
-      <p>Detailed explanation in 2-3 engaging sentences. Make it specific and actionable.</p>
+      <h2>1. First Key Point</h2>
+      <p>Write 2-3 engaging sentences explaining this point. Include specific details and actionable advice. Make it practical and easy to understand.</p>
     </section>
-    <!-- Continue until you have exactly ${numberOfPoints} points -->
-  </div>
-
-  <div class="hashtags">
-    <span>#Inspiration</span> <span>#SelfDevelopment</span> <span>#PersonalGrowth</span>
+    <section class="point">
+      <h2>2. Second Key Point</h2>
+      <p>Write 2-3 engaging sentences explaining this point. Include specific details and actionable advice. Make it practical and easy to understand.</p>
+    </section>
+    <section class="point">
+      <h2>3. Third Key Point</h2>
+      <p>Write 2-3 engaging sentences explaining this point. Include specific details and actionable advice. Make it practical and easy to understand.</p>
+    </section>
+    <section class="point">
+      <h2>4. Fourth Key Point</h2>
+      <p>Write 2-3 engaging sentences explaining this point. Include specific details and actionable advice. Make it practical and easy to understand.</p>
+    </section>
+    <section class="point">
+      <h2>5. Fifth Key Point</h2>
+      <p>Write 2-3 engaging sentences explaining this point. Include specific details and actionable advice. Make it practical and easy to understand.</p>
+    </section>
   </div>
 </article>
 
-Critical Requirements:
-1. You MUST generate exactly ${numberOfPoints} points - no more, no less
-2. Number each point sequentially from 1 to ${numberOfPoints}
-3. Each point must have a clear title starting with its number
-4. Each point must have 2-3 detailed, actionable sentences
-5. Use proper HTML tags as shown above
-6. Include relevant hashtags at the end`,
-      temperature: 0.7,
-      max_tokens: 1500,
-      presence_penalty: 1.15
-    };
+Guidelines:
+1. Each section must be properly wrapped in HTML tags
+2. Each point should be a complete, actionable tip
+3. Use clear, engaging language
+4. Include specific examples and practical advice
+5. Maintain proper HTML structure throughout
+6. Do not include any markdown or other formatting
+7. Do not include numbering in the actual content
+8. Keep the HTML structure exactly as shown
 
-    let fullResponse = '';
+Remember: Only output the HTML structure with your content. No additional text or explanations.`;
+
+    let articleHtml = '';
     try {
-      for await (const event of replicateLLM.stream("meta/meta-llama-3-70b-instruct", { input })) {
-        fullResponse += event;
+      for await (const event of replicate.stream(
+        "meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3",
+        {
+          input: {
+            prompt: articlePrompt,
+            temperature: 0.7,
+            max_tokens: 2000,
+            top_p: 0.9,
+            system_prompt: "You are a professional content writer who always responds with clean, properly formatted HTML only."
+          }
+        }
+      )) {
+        articleHtml += event;
       }
+
+      // Clean up the response
+      articleHtml = articleHtml.trim();
+      articleHtml = articleHtml.replace(/```html/g, '').replace(/```/g, '');
+      
+      // Extract article content
+      const articleMatch = articleHtml.match(/<article>[\s\S]*?<\/article>/);
+      if (!articleMatch) {
+        console.error('Raw response:', articleHtml);
+        throw new Error('Invalid article format received');
+      }
+      
+      articleHtml = articleMatch[0];
+
+      // Validate the structure
+      const sections = articleHtml.match(/<section class="point">/g) || [];
+      if (
+        !articleHtml.includes('<h1>') ||
+        !articleHtml.includes('<div class="content">') ||
+        sections.length !== 5
+      ) {
+        throw new Error('Article structure is incomplete');
+      }
+
+      // Clean up any potential formatting issues
+      articleHtml = articleHtml
+        .replace(/\n\s*/g, '\n')  // Normalize whitespace
+        .replace(/>\s+</g, '>\n<')  // Add proper line breaks
+        .replace(/\s+/g, ' ')  // Remove extra spaces
+        .trim();
+
     } catch (error) {
-      console.error('Error in LLM generation:', error);
+      console.error('Error in text generation:', error);
       throw new Error('Failed to generate article content');
     }
 
-    // Extract the article HTML and ensure it's not empty
-    const articleMatch = fullResponse.match(/<article>([\s\S]*?)<\/article>/);
-    if (!articleMatch) {
-      console.error('No article HTML found in response:', fullResponse);
-      throw new Error('Invalid article format received');
-    }
-    
-    const articleHtml = articleMatch[1].trim();
-
-    // Generate cover image
+    // Generate cover image using a more reliable configuration
     let coverImage = '';
     try {
-      if (!process.env.REPLICATE_API_TOKEN) {
-        throw new Error('REPLICATE_API_TOKEN is not configured');
-      }
-
-      const replicateImg = new Replicate({
-        auth: process.env.REPLICATE_API_TOKEN,
-      });
-
-      console.log('Generating cover image for:', displayTitle);
-
-      const prediction = await replicateImg.predictions.create({
-        version: "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+      const coverImagePrediction = await replicate.predictions.create({
+        version: "db21e45d3f7023abc2a46ee38a23973f6dce16bb082a930b0c49861f96d1e5bf",
         input: {
-          prompt: `Create a stunning Pinterest cover image for: "${displayTitle}". Make it eye-catching and professional.`,
-          negative_prompt: "low quality, blurry, bad anatomy, text, watermark",
-          width: 1024,
+          prompt: `High quality Pinterest style image about ${title}, modern minimal design, clean composition, professional photography style`,
+          negative_prompt: "text, watermark, logo, ugly, deformed, noisy, blurry, low contrast, oversaturated",
+          width: 768,
           height: 1024,
           num_outputs: 1,
-          scheduler: "K_EULER",
-          num_inference_steps: 50,
+          num_inference_steps: 30,
           guidance_scale: 7.5,
+          scheduler: "K_EULER",
         }
       });
 
-      // Wait for the prediction to complete
-      const result = await waitForPrediction(replicateImg, prediction);
-      console.log('Cover image generation completed:', result);
-
-      if (!result.output || !Array.isArray(result.output) || result.output.length === 0) {
-        throw new Error('No image URL in output');
+      const result = await waitForPrediction(replicate, coverImagePrediction);
+      if (!result.output || !result.output[0]) {
+        throw new Error('No image generated');
       }
-
       coverImage = result.output[0];
-      console.log('Successfully generated cover image:', coverImage);
-
     } catch (error) {
-      console.error('Detailed error generating cover image:', error);
-      throw new Error(`Failed to generate cover image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (DEBUG) {
+        console.error('Full error details:', {
+          error,
+          message: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : undefined
+        });
+      }
+      // Return a default/placeholder image URL instead of throwing an error
+      coverImage = 'https://via.placeholder.com/768x1024?text=Article+Cover';
     }
 
-    // Generate images for each point
-    const pointMatches = articleHtml.match(/<section class="point">([\s\S]*?)<\/section>/g) || [];
-    const images: string[] = [];
+    // Generate section images with similar reliable configuration
+    const sectionMatches = articleHtml.match(/<section class="point">[\s\S]*?<\/section>/g) || [];
+    const sectionImages = [];
 
-    for (const pointHtml of pointMatches) {
+    for (const section of sectionMatches) {
       try {
-        const textContent = pointHtml.replace(/<[^>]+>/g, ' ').trim();
-        console.log('Generating image for point:', textContent.substring(0, 100) + '...');
+        const headingMatch = section.match(/<h2>(.*?)<\/h2>/);
+        const heading = headingMatch ? headingMatch[1] : '';
 
-        const prediction = await replicateImg.predictions.create({
-          version: "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+        const prediction = await replicate.predictions.create({
+          version: "db21e45d3f7023abc2a46ee38a23973f6dce16bb082a930b0c49861f96d1e5bf",
           input: {
-            prompt: `Create a Pinterest-style image for this tip: "${textContent.substring(0, 200)}". Make it visually appealing and professional.`,
-            negative_prompt: "low quality, blurry, bad anatomy, text, watermark",
-            width: 1024,
-            height: 1024,
+            prompt: `High quality Pinterest style image about ${heading}, modern minimal design, clean composition, professional photography style`,
+            negative_prompt: "text, watermark, logo, ugly, deformed, noisy, blurry, low contrast, oversaturated",
+            width: 768,
+            height: 768,
             num_outputs: 1,
-            scheduler: "K_EULER",
-            num_inference_steps: 50,
+            num_inference_steps: 30,
             guidance_scale: 7.5,
+            scheduler: "K_EULER",
           }
         });
 
-        // Wait for the prediction to complete
-        const result = await waitForPrediction(replicateImg, prediction);
-        console.log('Point image generation completed:', result);
-
-        if (!result.output || !Array.isArray(result.output) || result.output.length === 0) {
-          throw new Error('No image URL in output');
+        const result = await waitForPrediction(replicate, prediction);
+        if (!result.output || !result.output[0]) {
+          throw new Error('No image generated');
         }
-
-        const imageUrl = result.output[0];
-        images.push(imageUrl);
-        console.log('Successfully generated point image:', imageUrl);
-
+        sectionImages.push(result.output[0]);
       } catch (error) {
-        console.error('Error generating point image:', error);
-        images.push(''); // Use empty string for failed images
+        console.error('Error generating section image:', error);
+        // Use a placeholder image for failed section image generation
+        sectionImages.push('https://via.placeholder.com/768x768?text=Section+Image');
       }
     }
 
-    if (!coverImage) {
-      throw new Error('Failed to generate cover image');
+    // Clean up the title before saving
+    const cleanTitle = title
+      .replace(/\*\*/g, '')
+      .replace(/\[|\]/g, '')
+      .replace(/^\d+\.\s*/, '');
+
+    if (!articleHtml) {
+      return NextResponse.json(
+        { error: 'Failed to generate article content' },
+        { status: 500 }
+      );
     }
 
-    if (images.length === 0) {
-      throw new Error('Failed to generate any point images');
-    }
+    // Save article directly to MongoDB
+    try {
+      await connectDB();
 
-    return NextResponse.json({
-      article: {
-        title: displayTitle,
-        html: articleHtml,
+      const article = await Article.create({
+        userId,
+        title: cleanTitle,
+        html: articleHtml, // Use the generated HTML content
         coverImage,
-        images,
-      },
-    });
+        images: sectionImages,
+        createdAt: new Date()
+      });
+
+      if (!article) {
+        throw new Error('Failed to save article');
+      }
+
+      return NextResponse.json({ article });
+    } catch (error) {
+      console.log('Error saving article:', error);
+      return NextResponse.json(
+        { error: 'Failed to save article' },
+        { status: 500 }
+      );
+    }
 
   } catch (error) {
-    console.error('Error in article generation:', error);
+    console.error('Article generation error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate article" },
+      { error: error instanceof Error ? error.message : 'Failed to generate article' },
       { status: 500 }
     );
   }
 }
-
+  
