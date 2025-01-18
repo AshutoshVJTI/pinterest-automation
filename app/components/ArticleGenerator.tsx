@@ -38,12 +38,12 @@ export default function ArticleGenerator({
       }
 
       // Check if we have article data and content
-      if (!data.article || !data.article.content) {
+      if (!data.article || !data.article.html) {
         throw new Error('No article content received');
       }
 
       // Clean up the content - remove any markdown formatting from the title
-      let cleanContent = data.article.content;
+      let cleanContent = data.article.html;
       cleanContent = cleanContent.replace(/\*\*/g, ''); // Remove bold markdown
       cleanContent = cleanContent.replace(/\[|\]/g, ''); // Remove square brackets
 

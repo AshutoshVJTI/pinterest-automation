@@ -4,27 +4,29 @@ const ArticleSchema = new mongoose.Schema({
   userId: {
     type: String,
     required: true,
-    index: true
+    index: true,
   },
   title: {
     type: String,
-    required: true
+    required: true,
   },
-  content: {
+  html: {
     type: String,
     required: true
   },
   coverImage: {
     type: String,
-    default: ''
+    default: '',
   },
-  images: [{
-    type: String
-  }],
+  images: [
+    {
+      type: String,
+    },
+  ],
   createdAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
-export default mongoose.models.Article || mongoose.model('Article', ArticleSchema); 
+export default mongoose.models.Article || mongoose.model('Article', ArticleSchema);

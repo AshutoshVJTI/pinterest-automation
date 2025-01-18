@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     const article = await Article.create({
       userId,
       title,
-      content: html,
+      html,
       coverImage,
       images,
       createdAt: new Date()
